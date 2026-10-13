@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base theme; Compose Material3 takes over at runtime. -->
+    <style name="Theme.TermPilot" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0D1117</item>
+        <item name="android:statusBarColor">#FF0D1117</item>
+        <item name="android:navigationBarColor">#FF0D1117</item>
+    </style>
+</resources>
