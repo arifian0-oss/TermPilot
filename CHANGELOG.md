@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.3 — 2026-10-13
+
+- Fixed: terminal input. The soft keyboard often never appeared (focus/IME
+  timing during screen transitions). `showKeyboard()` is now hardened (focus
+  check + one forced retry), re-invoked when the terminal connects, and a new
+  **KBD** key in the extra-keys row toggles the keyboard deterministically.
+- Fixed: agent "thinking" disconnects. SSH keepalive (window-change ping every
+  45 s) keeps NAT/firewall mappings alive during long idle stretches; the LLM
+  client now retries transient network failures (DNS/timeout/reset, HTTP
+  429/5xx) with backoff; the screen stays awake while the agent runs so Doze
+  can't kill a long run.
+- Tweaked: LLM settings now persist on every keystroke (write-through) — the
+  previous Save-button flow could leave "Test connection" and the agent using
+  different values.
+
 ## v0.1.2 — 2026-10-13
 
 - Fixed: "Connection failed: no such algorithm: X25519 for provider BC".

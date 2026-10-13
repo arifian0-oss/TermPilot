@@ -1,6 +1,7 @@
 package com.termpilot.app.llm
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -8,6 +9,10 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.ConnectException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -76,12 +81,41 @@ class LlmClient {
         }
     }
 
-    /** POST {baseUrl}/chat/completions with tool support. */
+    /** POST {baseUrl}/chat/completions with tool support. Retries transient
+     * network failures (mobile networks drop often mid-"thinking"). */
     suspend fun chat(
         config: Config,
         messages: List<ChatMessage>,
         tools: List<ToolDef>,
     ): ChatMessage = withContext(Dispatchers.IO) {
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                return@withContext executeChat(config, messages, tools)
+            } catch (e: Exception) {
+                lastError = e
+                if (!isTransient(e) || attempt == 2) throw e
+                delay(1500L * (attempt + 1))
+            }
+        }
+        throw lastError!!
+    }
+
+    private fun isTransient(e: Exception): Boolean = when (e) {
+        is UnknownHostException, is SocketTimeoutException,
+        is ConnectException, is SocketException -> true
+        is LlmHttpException -> e.code == 429 || e.code in 500..599
+        else -> false
+    }
+
+    class LlmHttpException(val code: Int, body: String) :
+        Exception("LLM HTTP $code: ${body.take(500)}")
+
+    private fun executeChat(
+        config: Config,
+        messages: List<ChatMessage>,
+        tools: List<ToolDef>,
+    ): ChatMessage {
         val body = JSONObject()
             .put("model", config.model)
             .put("messages", JSONArray().apply {
@@ -123,9 +157,9 @@ class LlmClient {
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        http.newCall(req).execute().use { resp ->
+        return http.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) error("LLM HTTP ${resp.code}: ${text.take(500)}")
+            if (!resp.isSuccessful) throw LlmHttpException(resp.code, text)
             val msg = JSONObject(text)
                 .getJSONArray("choices").getJSONObject(0)
                 .getJSONObject("message")

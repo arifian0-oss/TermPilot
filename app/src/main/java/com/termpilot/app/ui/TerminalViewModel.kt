@@ -215,6 +215,7 @@ class TerminalViewModel(
                 ensureActive() // user may have left during the blocking connect
                 _connState.value = ConnState.Connected(host.label)
                 startPumping()
+                startKeepAlive()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -303,12 +304,49 @@ class TerminalViewModel(
         sshSession?.changeWindowSize(emu.mColumns, emu.mRows)
     }
 
-    private fun showKeyboard() {
+    /**
+     * Harmless traffic every 45 s while connected: keeps NAT/firewall mappings
+     * alive during long idle stretches (e.g. the agent "thinking"), so the
+     * server or middleboxes don't silently drop the TCP connection.
+     */
+    private var keepAliveJob: Job? = null
+
+    private fun startKeepAlive() {
+        keepAliveJob?.cancel()
+        keepAliveJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(45_000)
+                runCatching { updateSshWindowSize() }
+            }
+        }
+    }
+
+    /** Show the soft keyboard, retrying once if the implicit request is ignored
+     * (happens when the window isn't focused yet during transitions). */
+    fun showKeyboard() {
         val view = terminalView ?: return
         view.post {
-            view.requestFocus()
+            if (!view.hasFocus()) view.requestFocus()
             val imm = container.app.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            if (!imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)) {
+                view.postDelayed({
+                    if (!imm.isActive(view)) {
+                        imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                    }
+                }, 300)
+            }
+        }
+    }
+
+    /** Manual keyboard toggle (extra-keys row): deterministic control when
+     * auto-show misbehaves on a device/keyboard combo. */
+    fun toggleKeyboard() {
+        val view = terminalView ?: return
+        val imm = container.app.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        if (imm.isActive(view)) {
+            imm.hideSoftInputFromWindow(view.windowToken, 0)
+        } else {
+            showKeyboard()
         }
     }
 
@@ -394,6 +432,7 @@ class TerminalViewModel(
     fun disconnect() {
         userClosed = true
         agentJob?.cancel()
+        keepAliveJob?.cancel()
         connectJob?.cancel()
         viewModelScope.launch {
             container.sshManager.closeSession(hostId)
@@ -404,6 +443,7 @@ class TerminalViewModel(
     override fun onCleared() {
         userClosed = true
         agentJob?.cancel()
+        keepAliveJob?.cancel()
         connectJob?.cancel()
         pumpThread?.interrupt()
         keystrokeExecutor.shutdownNow()

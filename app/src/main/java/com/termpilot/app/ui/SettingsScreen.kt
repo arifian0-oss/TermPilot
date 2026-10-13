@@ -17,6 +17,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.termpilot.app.AppContainer
+import com.termpilot.app.data.LlmSettings
 import com.termpilot.app.llm.LlmClient
 import kotlinx.coroutines.launch
 
@@ -24,18 +25,55 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     private val repo = container.settingsRepository
     val settings = repo.settings
 
+    // Fields persist immediately on every change (write-through): the agent
+    // and "Test connection" can never see different values.
+    var baseUrl by mutableStateOf("")
+        private set
+    var model by mutableStateOf("")
+        private set
+    var timeoutText by mutableStateOf("60")
+        private set
     var apiKey by mutableStateOf(repo.getApiKey() ?: "")
+        private set
     var showKey by mutableStateOf(false)
     var testResult by mutableStateOf<String?>(null)
         private set
     var testing by mutableStateOf(false)
         private set
+    private var seeded = false
+
+    /** Seed fields once from DataStore; later emissions are our own writes. */
+    fun seedFrom(s: LlmSettings) {
+        if (seeded) return
+        seeded = true
+        baseUrl = s.baseUrl
+        model = s.model
+        timeoutText = s.commandTimeoutSeconds.toString()
+    }
+
+    fun onBaseUrlChange(v: String) {
+        baseUrl = v
+        viewModelScope.launch { repo.setBaseUrl(v) }
+    }
+
+    fun onModelChange(v: String) {
+        model = v
+        viewModelScope.launch { repo.setModel(v) }
+    }
+
+    fun onTimeoutChange(v: String) {
+        timeoutText = v.filter(Char::isDigit).take(3)
+        timeoutText.toIntOrNull()?.let { t ->
+            viewModelScope.launch { repo.setCommandTimeoutSeconds(t) }
+        }
+    }
+
+    fun onApiKeyChange(v: String) {
+        apiKey = v
+        repo.setApiKey(v) // SecureStore is synchronous
+    }
 
     fun toggleShowKey() { showKey = !showKey }
-    fun saveApiKey() = viewModelScope.launch { repo.setApiKey(apiKey) }
-    fun setBaseUrl(v: String) = viewModelScope.launch { repo.setBaseUrl(v) }
-    fun setModel(v: String) = viewModelScope.launch { repo.setModel(v) }
-    fun setTimeout(v: Int) = viewModelScope.launch { repo.setCommandTimeoutSeconds(v) }
 
     fun testConnection(baseUrl: String, model: String) = viewModelScope.launch {
         testing = true
@@ -66,12 +104,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
     val vm: SettingsViewModel = viewModel(factory = VmFactory { SettingsViewModel(container) })
     val settings by vm.settings.collectAsState(initial = null)
-    var baseUrl by remember(settings) { mutableStateOf(settings?.baseUrl ?: "") }
-    var model by remember(settings) { mutableStateOf(settings?.model ?: "") }
-    var timeoutText by remember(settings) {
-        mutableStateOf(settings?.commandTimeoutSeconds?.toString() ?: "60")
+    LaunchedEffect(settings) {
+        (settings as LlmSettings?)?.let { vm.seedFrom(it) }
     }
-    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -97,17 +132,17 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(
-                value = baseUrl, onValueChange = { baseUrl = it },
+                value = vm.baseUrl, onValueChange = vm::onBaseUrlChange,
                 label = { Text("Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("https://api.openai.com/v1") },
             )
             OutlinedTextField(
-                value = model, onValueChange = { model = it },
+                value = vm.model, onValueChange = vm::onModelChange,
                 label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("gpt-4o-mini") },
             )
             OutlinedTextField(
-                value = vm.apiKey, onValueChange = { vm.apiKey = it },
+                value = vm.apiKey, onValueChange = vm::onApiKeyChange,
                 label = { Text("API key") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (vm.showKey) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -117,23 +152,20 @@ fun SettingsScreen(container: AppContainer, onBack: () -> Unit) {
                 },
             )
             OutlinedTextField(
-                value = timeoutText,
-                onValueChange = { timeoutText = it.filter(Char::isDigit).take(3) },
+                value = vm.timeoutText,
+                onValueChange = vm::onTimeoutChange,
                 label = { Text("Default command timeout (seconds)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
+            Text(
+                "Changes save automatically as you type.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
-                    scope.launch {
-                        vm.saveApiKey()
-                        vm.setBaseUrl(baseUrl)
-                        vm.setModel(model)
-                        timeoutText.toIntOrNull()?.let { vm.setTimeout(it) }
-                    }
-                }) { Text("Save") }
                 OutlinedButton(
-                    onClick = { vm.testConnection(baseUrl.trim(), model.trim()) },
+                    onClick = { vm.testConnection(vm.baseUrl.trim(), vm.model.trim()) },
                     enabled = !vm.testing,
                 ) { Text(if (vm.testing) "Testing…" else "Test connection") }
             }

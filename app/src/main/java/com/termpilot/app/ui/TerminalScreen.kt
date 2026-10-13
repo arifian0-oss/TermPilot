@@ -1,6 +1,8 @@
 package com.termpilot.app.ui
 
+import android.app.Activity
 import android.view.KeyEvent
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -21,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -40,6 +43,20 @@ fun TerminalScreen(container: AppContainer, hostId: String, onBack: () -> Unit) 
     val vm: TerminalViewModel = viewModel(factory = VmFactory { TerminalViewModel(container, hostId) })
     val connState by vm.connState.collectAsState()
     val prompt by vm.prompt.collectAsState()
+    val activity = LocalContext.current as? Activity
+
+    // Show the keyboard once the terminal view is up…
+    LaunchedEffect(connState) {
+        if (connState is TerminalViewModel.ConnState.Connected) vm.showKeyboard()
+    }
+    // …and keep the screen awake while the agent works, so Doze can't kill
+    // a long "thinking" stretch mid-run.
+    LaunchedEffect(vm.agentRunning) {
+        activity?.window?.let { w ->
+            if (vm.agentRunning) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else w.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -143,6 +160,7 @@ private fun TerminalContent(vm: TerminalViewModel) {
                     setTerminalViewClient(vm.viewClient)
                     // REQUIRED: initializes the renderer before attachSession().
                     setTextSize(30)
+                    isFocusable = true
                     isFocusableInTouchMode = true
                     attachSession(vm.terminalSession)
                     vm.onViewCreated(this)
@@ -166,6 +184,7 @@ private fun ExtraKeysRow(vm: TerminalViewModel) {
             .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        KeyButton("KBD") { vm.toggleKeyboard() }
         KeyButton("ESC") { vm.sendKey(KeyEvent.KEYCODE_ESCAPE) }
         KeyButton("TAB") { vm.sendKey(KeyEvent.KEYCODE_TAB) }
         ToggleKeyButton("CTRL", vm.ctrlHeld) { vm.ctrlHeld = it }
