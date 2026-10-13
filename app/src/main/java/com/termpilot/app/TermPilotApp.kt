@@ -20,6 +20,8 @@ class TermPilotApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Fix up the JCE provider before anything touches sshj crypto.
+        com.termpilot.app.ssh.CryptoProviders.ensure()
         container = AppContainer(this)
     }
 }

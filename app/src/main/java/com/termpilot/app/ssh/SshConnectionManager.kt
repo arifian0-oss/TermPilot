@@ -85,6 +85,10 @@ class SshConnectionManager(
         onKeyboardInteractive: suspend (name: String, instruction: String, prompts: List<KeyboardPrompt>) -> List<String>?,
         echoToTerminal: ((String) -> Unit)? = null,
     ): SshSession = withContext(Dispatchers.IO) {
+        // JCE provider must be fixed up before any sshj crypto use (Android
+        // ships its own "BC" which shadows the bundled BouncyCastle jar).
+        CryptoProviders.ensure()
+
         // Reuse an existing live session.
         sessions[host.id]?.let { return@withContext it }
 

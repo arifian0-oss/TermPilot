@@ -153,8 +153,18 @@ which the external-I/O path never touches).
 - **One sshj `Session` = one channel.** Agent commands each open a fresh
   `client.startSession()` + `exec()`, multiplexed over the single connection
   and isolated from the interactive shell.
-- BouncyCastle ships as a `runtime` dep and auto-registers if present (helps
-  Ed25519 on older Android); chacha20-poly1305 is self-contained in sshj.
+- BouncyCastle ships as an `implementation` dep and is registered at runtime
+  under the name **"TermPilotBC"** (see `ssh/CryptoProviders.kt`). Why: Android
+  ships its own stripped-down BouncyCastle as provider "BC", which shadows the
+  bundled jar — sshj's auto-registration then resolves every
+  `getInstance(alg, "BC")` to the *platform* BC, which lacks X25519/Ed25519
+  ("no such algorithm: X25519 for provider BC"). `BouncyCastleProvider` is
+  final, so instead of subclassing we copy its algorithm table into a thin
+  `Provider` wrapper under the collision-free name and point sshj at it via
+  `SecurityUtils.setSecurityProvider`. The wrapper is appended (not inserted
+  first), so unrelated default JCE lookups (TLS, AndroidX Security) are
+  unaffected. (SpongyCastle was considered and rejected: 1.58 predates X25519.)
+- chacha20-poly1305 is self-contained in sshj.
 
 ## Secrets
 

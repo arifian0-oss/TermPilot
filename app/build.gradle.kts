@@ -85,6 +85,9 @@ dependencies {
 
     // SSH
     implementation("com.hierynomus:sshj:0.40.0")
+    // Compile dep (not just sshj's runtime dep): CryptoProviders references
+    // BouncyCastleProvider directly to work around Android's platform "BC".
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
 
     // Terminal emulation + view: vendored Termux modules (patched for SSH).
     implementation(project(":terminal-emulator"))

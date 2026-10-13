@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.2 — 2026-10-13
+
+- Fixed: "Connection failed: no such algorithm: X25519 for provider BC".
+  Android's platform BouncyCastle ("BC") shadowed the bundled bcprov jar, so
+  sshj's JCE lookups hit the platform provider, which lacks X25519/Ed25519.
+  New `ssh/CryptoProviders.kt` exposes the bundled BouncyCastle under the
+  collision-free provider name "TermPilotBC" (algorithm-table copy into a
+  thin `Provider` wrapper — `BouncyCastleProvider` is final) and points sshj
+  at it via `SecurityUtils.setSecurityProvider`. Verified with a JVM harness:
+  X25519 key agreement + Ed25519 sign/verify through "TermPilotBC".
+
 ## v0.1.1 — 2026-10-13
 
 - Fixed: app crashed on launch — `AndroidManifest.xml` was missing
